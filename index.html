@@ -1,10 +1,21 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!-- Removed missing favicon link to fix 404 error -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Morgenster Hospital</title>
+    <script>
+      // Suppress Tailwind CDN production warning
+      (function() {
+        const originalWarn = console.warn;
+        console.warn = function(message, ...args) {
+          if (typeof message === 'string' && message.includes('cdn.tailwindcss.com')) return;
+          originalWarn.apply(console, [message, ...args]);
+        };
+      })();
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
   <script type="importmap">
 {

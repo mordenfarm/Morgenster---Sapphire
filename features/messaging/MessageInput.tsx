@@ -1,3 +1,4 @@
+
 import React, { useState, useRef } from 'react';
 import { db } from '../../services/firebase';
 import { useAuth } from '../../context/AuthContext';
@@ -25,63 +26,70 @@ const MessageInput: React.FC<MessageInputProps> = ({ chatId }) => {
     setIsSending(true);
 
     try {
+        // Offline-Friendly Change: switched from runTransaction to batch.
+        // Transactions require server connectivity to guarantee consistency.
+        // Batches work with the local cache immediately and sync later.
         const chatRef = db.collection('chats').doc(chatId);
         const messageRef = chatRef.collection('messages').doc();
+        const batch = db.batch();
 
-        await db.runTransaction(async (transaction) => {
-            const chatDoc = await transaction.get(chatRef);
-            if (!chatDoc.exists) throw new Error("Chat does not exist.");
+        // We must read the chat doc first to get participants. 
+        // This works offline if the chat was previously loaded (cached).
+        const chatDoc = await chatRef.get();
+        if (!chatDoc.exists) throw new Error("Chat does not exist.");
 
-            const chatData = chatDoc.data() as ChatConversation;
-            const otherParticipantId = chatData.participants.find(p => p !== userProfile.id);
-            if (!otherParticipantId) throw new Error("Recipient not found in chat.");
-            
-            const messageData: any = {
-                chatId,
-                senderId: userProfile.id,
-                senderName: `${userProfile.name} ${userProfile.surname}`,
-                text: messageText,
-                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                read: false,
-            };
+        const chatData = chatDoc.data() as ChatConversation;
+        const otherParticipantId = chatData.participants.find(p => p !== userProfile.id);
+        if (!otherParticipantId) throw new Error("Recipient not found in chat.");
+        
+        const messageData: any = {
+            chatId,
+            senderId: userProfile.id,
+            senderName: `${userProfile.name} ${userProfile.surname}`,
+            text: messageText,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            read: false,
+        };
 
-            if (attachment) messageData.attachment = attachment;
-            
-            transaction.set(messageRef, messageData);
-            
-            const lastMessage = {
-                id: messageRef.id,
-                text: attachment ? `Attachment: ${attachment.name}` : messageText,
-                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                senderId: userProfile.id,
-                read: false,
-            };
+        if (attachment) messageData.attachment = attachment;
+        
+        batch.set(messageRef, messageData);
+        
+        const lastMessage = {
+            id: messageRef.id,
+            text: attachment ? `Attachment: ${attachment.name}` : messageText,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            senderId: userProfile.id,
+            read: false,
+        };
 
-            const newUnreadCounts = chatData.unreadCounts || {};
-            newUnreadCounts[otherParticipantId] = (newUnreadCounts[otherParticipantId] || 0) + 1;
+        const newUnreadCounts = chatData.unreadCounts || {};
+        // Optimistic update of unread count
+        newUnreadCounts[otherParticipantId] = (newUnreadCounts[otherParticipantId] || 0) + 1;
 
-            transaction.update(chatRef, {
-                lastMessage,
-                unreadCounts: newUnreadCounts,
-            });
-
-            const notificationRef = db.collection('notifications').doc();
-            transaction.set(notificationRef, {
-                recipientId: otherParticipantId,
-                senderId: userProfile.id,
-                senderName: `${userProfile.name} ${userProfile.surname}`,
-                title: `New message from ${userProfile.name}`,
-                message: messageText.substring(0, 100), // Truncate for notification
-                type: 'message',
-                link: `/messages/${chatId}`,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                read: false,
-            });
+        batch.update(chatRef, {
+            lastMessage,
+            unreadCounts: newUnreadCounts,
         });
+
+        const notificationRef = db.collection('notifications').doc();
+        batch.set(notificationRef, {
+            recipientId: otherParticipantId,
+            senderId: userProfile.id,
+            senderName: `${userProfile.name} ${userProfile.surname}`,
+            title: `New message from ${userProfile.name}`,
+            message: messageText.substring(0, 100), // Truncate for notification
+            type: 'message',
+            link: `/messages/${chatId}`,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            read: false,
+        });
+
+        await batch.commit();
 
     } catch (error) {
         console.error("Error sending message:", error);
-        addNotification('Failed to send message.', 'error');
+        addNotification('Failed to send message. Ensure you are connected or chat is loaded.', 'error');
     } finally {
         setIsSending(false);
     }
@@ -100,17 +108,13 @@ const MessageInput: React.FC<MessageInputProps> = ({ chatId }) => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'document') => {
       const file = e.target.files?.[0];
       if (file) {
-          // Placeholder logic for now
           addNotification('File uploads are not yet enabled.', 'info');
           const attachment = {
               name: file.name,
               type,
-              url: 'placeholder_url' // In a real app, this would be the Firebase Storage URL after upload
+              url: 'placeholder_url'
           }
-          // For demonstration, we'll send a message indicating the file was "sent"
           sendMessage(`Attached: ${file.name}`, attachment);
-          
-          // Reset the input so the same file can be selected again
           e.target.value = ''; 
       }
   };

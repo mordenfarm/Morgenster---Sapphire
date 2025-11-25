@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../services/firebase';
@@ -83,6 +84,7 @@ const PatientRegistration: React.FC = () => {
     const generateHospitalNumber = async (): Promise<string> => {
         const counterRef = db.collection('counters').doc('patients');
         try {
+            // Attempt Transaction (works Online)
             return await db.runTransaction(async (transaction) => {
                 const doc = await transaction.get(counterRef);
                 let nextNumber = 1;
@@ -96,9 +98,12 @@ const PatientRegistration: React.FC = () => {
                 return `MH${String(nextNumber).padStart(4, '0')}`;
             });
         } catch (error) {
-            console.error("Hospital number generation failed: ", error);
-            addNotification('Could not generate hospital number. Please try again.', 'error');
-            throw new Error("Could not generate hospital number.");
+            console.warn("Transaction failed (likely offline). Generating Offline ID.");
+            // Fallback for Offline (or Transaction Failure)
+            // We use a timestamp + random component to ensure uniqueness without server coordination
+            const offlineId = `OFF-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
+            addNotification("Offline Mode: Generated temporary Hospital ID. Please update later if needed.", "warning");
+            return offlineId;
         }
     }
 
@@ -133,8 +138,10 @@ const PatientRegistration: React.FC = () => {
                 financials: { totalBill: 0, amountPaid: 0, balance: 0 }
             };
 
+            // This standard 'add' call works offline (writes to IndexedDB)
             await db.collection('patients').add(newPatient);
-            addNotification(`Patient ${formData.name} ${formData.surname} registered successfully with Hospital No: ${hospitalNumber}`, 'success');
+            
+            addNotification(`Patient registered! ID: ${hospitalNumber}`, 'success');
             setFormStatus('success');
             setTimeout(() => {
                 setFormData(initialFormState); // Reset form

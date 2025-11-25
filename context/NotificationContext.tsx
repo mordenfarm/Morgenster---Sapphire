@@ -34,7 +34,7 @@ const NotificationComponent: React.FC<Notification & { onDismiss: (id: number) =
                 onDismiss(id);
             }, 400); // Animation duration
             return () => clearTimeout(dismissTimer);
-        }, 1500); // 1.5 seconds
+        }, 2500); // Increased duration to read offline messages
         return () => clearTimeout(timer);
     }, [id, onDismiss]);
 
@@ -60,8 +60,16 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
   const addNotification = useCallback((message: string, type: NotificationType) => {
+    // Append offline status if applicable
+    const isOffline = !navigator.onLine;
+    let finalMessage = message;
+    
+    if (isOffline && (type === 'success' || type === 'info')) {
+        finalMessage = `${message} (Saved Locally)`;
+    }
+
     const id = Date.now();
-    setNotifications(prev => [...prev, { id, message, type }]);
+    setNotifications(prev => [...prev, { id, message: finalMessage, type }]);
   }, []);
 
   const removeNotification = useCallback((id: number) => {

@@ -595,8 +595,15 @@ const PatientProfile: React.FC = () => {
 
     setIsBillingCheckRunning(true);
     try {
-        const wardDoc = await db.collection('wards').doc(patientData.currentWardId).get();
-        if (!wardDoc.exists) throw new Error("Ward not found for billing");
+        // Use cached read if offline
+        const wardDoc = await db.collection('wards').doc(patientData.currentWardId).get({ source: 'default' });
+        
+        if (!wardDoc.exists) {
+             // Silent fail if ward data isn't in cache/server
+             console.log("Ward not found for auto-billing check (might be offline/uncached). Skipping.");
+             return;
+        }
+        
         const ward = wardDoc.data() as Ward;
 
         if (ward.pricePerDay <= 0) return; // Ward is free
@@ -662,7 +669,7 @@ const PatientProfile: React.FC = () => {
         return false;
     } catch (error) {
         console.error("Auto-billing error:", error);
-        addNotification('An error occurred during automatic bed billing.', 'error');
+        // Do not show error notification to user for background task failure to avoid annoyance
         return false;
     } finally {
         setIsBillingCheckRunning(false);

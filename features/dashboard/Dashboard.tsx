@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Role, Ward, Patient, InventoryItem } from '../../types';
@@ -15,14 +16,31 @@ import PatientSearch from './PatientSearch';
 // Animated Welcome Toast Component
 const WelcomeToast = ({ name }: { name: string }) => {
     const [visible, setVisible] = useState(false);
-    const [shouldRender, setShouldRender] = useState(true);
+    const [shouldRender, setShouldRender] = useState(false);
 
     useEffect(() => {
-        setVisible(true);
-        const hideTimer = setTimeout(() => setVisible(false), 4000);
-        const removeTimer = setTimeout(() => setShouldRender(false), 4600); // Wait for exit animation
-        return () => { clearTimeout(hideTimer); clearTimeout(removeTimer); };
-    }, []);
+        // Only show if we haven't shown it this session AND we have a valid name (not the default 'User')
+        const hasSeenWelcome = sessionStorage.getItem('welcomeShown');
+        
+        if (!hasSeenWelcome && name && name !== 'User') {
+            setShouldRender(true);
+            // Small delay to allow fade-in animation to trigger after render
+            const startTimer = setTimeout(() => setVisible(true), 100);
+            
+            // Mark as seen immediately so refreshing doesn't spam it, 
+            // but rely on session storage so closing/reopening browser resets it (standard session behavior)
+            sessionStorage.setItem('welcomeShown', 'true');
+            
+            const hideTimer = setTimeout(() => setVisible(false), 4000); // Visible for 4 seconds
+            const removeTimer = setTimeout(() => setShouldRender(false), 4600); // Unmount after animation
+            
+            return () => { 
+                clearTimeout(startTimer); 
+                clearTimeout(hideTimer); 
+                clearTimeout(removeTimer); 
+            };
+        }
+    }, [name]);
 
     if (!shouldRender) return null;
 

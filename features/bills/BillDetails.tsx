@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { db } from '../../services/firebase';
@@ -132,34 +133,34 @@ const BillDetails: React.FC = () => {
             </div>
         </div>
       
-        <div className="bg-[#161B22] border border-gray-700 p-8 rounded-lg shadow-md print-container">
+        <div className="bg-[#161B22] border border-gray-700 p-4 sm:p-8 rounded-lg shadow-md print-container">
             {/* Header */}
-            <div className="flex justify-between items-start pb-6 border-b border-gray-700 print-border">
-                <div className="flex items-center gap-4">
-                    <h2 className="text-3xl font-bold text-white">INVOICE</h2>
+            <div className="flex flex-col-reverse sm:flex-row justify-between items-start sm:items-start pb-6 border-b border-gray-700 print-border gap-4">
+                <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">
+                    <h2 className="text-2xl sm:text-3xl font-bold text-white">INVOICE</h2>
                     {getStatusBadge(bill.status)}
                 </div>
-                <div className="text-right">
-                    <img src="https://i.ibb.co/TDT9QtC9/images.png" alt="Logo" className="h-16 w-16 rounded-lg object-cover ml-auto" />
-                    <p className="text-sm text-gray-400 mt-2">Bill ID: {bill.id}</p>
+                <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-3">
+                    <p className="text-sm text-gray-400 sm:order-2 font-mono">ID: {bill.id?.slice(0, 8)}...</p>
+                    <img src="https://i.ibb.co/TDT9QtC9/images.png" alt="Logo" className="h-12 w-12 sm:h-16 sm:w-16 rounded-lg object-cover sm:ml-auto sm:order-1" />
                 </div>
             </div>
 
             {/* Patient & Bill Info */}
-            <div className="grid grid-cols-2 gap-8 my-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8 my-6">
                 <div>
                     <h3 className="text-sm font-semibold text-gray-400 uppercase">Bill To</h3>
                     <p className="text-lg font-bold text-white mt-1">{bill.patientName}</p>
                     <p className="text-gray-300">Hospital No: {bill.patientHospitalNumber}</p>
                 </div>
-                <div className="text-right">
+                <div className="text-left sm:text-right">
                     <h3 className="text-sm font-semibold text-gray-400 uppercase">Bill Date</h3>
                     <p className="text-lg font-medium text-white mt-1">{new Date(bill.date).toLocaleDateString()}</p>
                 </div>
             </div>
 
             {/* Itemized List */}
-            <div className="overflow-x-auto my-8">
+            <div className="overflow-x-auto my-8 border border-gray-700 rounded-lg sm:border-0">
                 <table className="w-full text-sm text-left text-gray-400">
                     <thead className="text-xs text-gray-400 uppercase bg-gray-700">
                         <tr>
@@ -171,7 +172,7 @@ const BillDetails: React.FC = () => {
                     </thead>
                     <tbody>
                         {bill.items.map((item, index) => (
-                            <tr key={index} className="border-b border-gray-700 print-border">
+                            <tr key={index} className="border-b border-gray-700 print-border last:border-0">
                                 <td className="px-4 py-3 font-medium text-white">{item.description}</td>
                                 <td className="px-4 py-3 text-center">{item.quantity}</td>
                                 <td className="px-4 py-3 text-right">${item.unitPrice.toFixed(2)}</td>
@@ -184,7 +185,7 @@ const BillDetails: React.FC = () => {
 
             {/* Financial Summary */}
             <div className="flex justify-end mt-8">
-                <div className="w-full max-w-xs space-y-3">
+                <div className="w-full sm:max-w-xs space-y-3 bg-gray-800/50 p-4 rounded-lg sm:bg-transparent sm:p-0">
                     <div className="flex justify-between text-md">
                         <span className="font-medium text-gray-300">Subtotal:</span>
                         <span className="font-medium text-white">${bill.totalBill.toFixed(2)}</span>

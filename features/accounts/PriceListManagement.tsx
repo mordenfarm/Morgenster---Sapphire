@@ -1,8 +1,9 @@
+
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { db } from '../../services/firebase';
-import { PriceListItem } from '../../types';
+import { PriceListItem, InventoryItem } from '../../types';
 import LoadingSpinner from '../../components/utils/LoadingSpinner';
-import { Edit, Plus, Search, Trash2, Building, LayoutGrid, Table as TableIcon } from 'lucide-react';
+import { Edit, Plus, Search, Trash2, Building, LayoutGrid, Table as TableIcon, AlertTriangle } from 'lucide-react';
 import { useNotification } from '../../context/NotificationContext';
 import AddPriceListItemModal from './AddPriceListItemModal';
 import EditPriceListItemModal from './EditPriceListItemModal';
@@ -10,6 +11,7 @@ import Modal from '../../components/utils/Modal';
 
 const PriceListManagement: React.FC = () => {
     const [items, setItems] = useState<PriceListItem[]>([]);
+    const [inventoryMap, setInventoryMap] = useState<Map<string, InventoryItem>>(new Map());
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
@@ -23,8 +25,20 @@ const PriceListManagement: React.FC = () => {
     const fetchItems = useCallback(async () => {
         setLoading(true);
         try {
-            const snapshot = await db.collection('priceList').get();
-            const itemList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PriceListItem));
+            const [priceListSnapshot, inventorySnapshot] = await Promise.all([
+                db.collection('priceList').get(),
+                db.collection('inventory').get()
+            ]);
+
+            const itemList = priceListSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PriceListItem));
+            
+            // Build inventory map for quick lookup by name
+            const invMap = new Map<string, InventoryItem>();
+            inventorySnapshot.docs.forEach(doc => {
+                const data = doc.data() as InventoryItem;
+                invMap.set(data.name, data);
+            });
+            setInventoryMap(invMap);
             
             itemList.sort((a, b) => {
                 const deptComp = a.department.localeCompare(b.department);
@@ -34,8 +48,8 @@ const PriceListManagement: React.FC = () => {
 
             setItems(itemList);
         } catch (error) {
-            console.error("Error fetching price list:", error);
-            addNotification('Failed to fetch price list.', 'error');
+            console.error("Error fetching data:", error);
+            addNotification('Failed to fetch data.', 'error');
         } finally {
             setLoading(false);
         }
@@ -117,19 +131,30 @@ const PriceListManagement: React.FC = () => {
 
             {viewMode === 'cards' ? (
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {filteredItems.map(item => (
-                        <div key={item.id} className="bg-[#161B22] border border-gray-700 rounded-lg shadow-md flex flex-col justify-between p-6 transition-all hover:shadow-sky-500/20 hover:border-sky-700 group">
-                            <div>
-                                <h3 className="text-lg font-semibold text-white truncate group-hover:text-sky-400 transition-colors">{item.name}</h3>
-                                <p className="flex items-center text-sm text-gray-400 mt-2"><Building size={14} className="mr-2 text-gray-500" />{item.department}</p>
-                                <p className="text-2xl font-bold text-sky-400 mt-4">${item.unitPrice.toFixed(2)}</p>
+                    {filteredItems.map(item => {
+                        const linkedInventory = inventoryMap.get(item.name);
+                        const isLowStock = linkedInventory ? linkedInventory.quantity <= linkedInventory.lowStockThreshold : false;
+
+                        return (
+                            <div key={item.id} className={`border rounded-lg shadow-md flex flex-col justify-between p-6 transition-all group ${isLowStock ? 'bg-red-900/10 border-red-900/50 hover:shadow-red-900/20' : 'bg-[#161B22] border-gray-700 hover:shadow-sky-500/20 hover:border-sky-700'}`}>
+                                <div>
+                                    <h3 className="text-lg font-semibold text-white truncate group-hover:text-sky-400 transition-colors">
+                                        {item.name}
+                                        {isLowStock && <AlertTriangle size={16} className="inline ml-2 text-red-400" title="Low Stock" />}
+                                    </h3>
+                                    <p className="flex items-center text-sm text-gray-400 mt-2"><Building size={14} className="mr-2 text-gray-500" />{item.department}</p>
+                                    <p className="text-2xl font-bold text-sky-400 mt-4">${item.unitPrice.toFixed(2)}</p>
+                                    {isLowStock && linkedInventory && (
+                                        <p className="text-xs text-red-400 mt-2 font-semibold">Only {linkedInventory.quantity} left in stock</p>
+                                    )}
+                                </div>
+                                <div className="flex items-center justify-end space-x-2 mt-6 pt-4 border-t border-gray-700">
+                                    <button onClick={() => handleEdit(item)} className="p-2 text-gray-400 hover:text-sky-500 bg-gray-800/50 hover:bg-sky-900/20 rounded-md transition-colors" aria-label={`Edit ${item.name}`}><Edit size={18} /></button>
+                                    <button onClick={() => handleDelete(item)} className="p-2 text-gray-400 hover:text-red-500 bg-gray-800/50 hover:bg-red-900/20 rounded-md transition-colors" aria-label={`Delete ${item.name}`}><Trash2 size={18} /></button>
+                                </div>
                             </div>
-                            <div className="flex items-center justify-end space-x-2 mt-6 pt-4 border-t border-gray-700">
-                                <button onClick={() => handleEdit(item)} className="p-2 text-gray-400 hover:text-sky-500 bg-gray-800/50 hover:bg-sky-900/20 rounded-md transition-colors" aria-label={`Edit ${item.name}`}><Edit size={18} /></button>
-                                <button onClick={() => handleDelete(item)} className="p-2 text-gray-400 hover:text-red-500 bg-gray-800/50 hover:bg-red-900/20 rounded-md transition-colors" aria-label={`Delete ${item.name}`}><Trash2 size={18} /></button>
-                            </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             ) : (
                 <div className="bg-[#161B22] border border-gray-700 rounded-lg shadow-md overflow-hidden animate-slide-in-top">
@@ -144,27 +169,37 @@ const PriceListManagement: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-700">
-                                {filteredItems.map((item) => (
-                                    <tr key={item.id} className="hover:bg-gray-800/30 transition-colors">
-                                        <td className="px-6 py-4 font-medium text-white">
-                                            {item.name}
-                                        </td>
-                                        <td className="px-6 py-4 text-gray-300">
-                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-800 border border-gray-600 text-gray-300">
-                                                {item.department}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-right font-bold text-sky-400">
-                                            ${item.unitPrice.toFixed(2)}
-                                        </td>
-                                        <td className="px-6 py-4 text-center">
-                                            <div className="flex items-center justify-center gap-2">
-                                                <button onClick={() => handleEdit(item)} className="p-1.5 text-gray-400 hover:text-sky-500 transition-colors" title="Edit"><Edit size={16} /></button>
-                                                <button onClick={() => handleDelete(item)} className="p-1.5 text-gray-400 hover:text-red-500 transition-colors" title="Delete"><Trash2 size={16} /></button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
+                                {filteredItems.map((item) => {
+                                    const linkedInventory = inventoryMap.get(item.name);
+                                    const isLowStock = linkedInventory ? linkedInventory.quantity <= linkedInventory.lowStockThreshold : false;
+
+                                    return (
+                                        <tr key={item.id} className={`transition-colors ${isLowStock ? 'bg-red-900/10 hover:bg-red-900/20 border-b border-red-900/30' : 'hover:bg-gray-800/30 border-b border-gray-700'}`}>
+                                            <td className="px-6 py-4 font-medium text-white">
+                                                {item.name}
+                                                {isLowStock && (
+                                                    <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-900/20 px-2 py-0.5 rounded-full" title={`Low Stock: ${linkedInventory?.quantity} remaining`}>
+                                                        <AlertTriangle size={10} /> LOW STOCK
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4 text-gray-300">
+                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-800 border border-gray-600 text-gray-300">
+                                                    {item.department}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 text-right font-bold text-sky-400">
+                                                ${item.unitPrice.toFixed(2)}
+                                            </td>
+                                            <td className="px-6 py-4 text-center">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <button onClick={() => handleEdit(item)} className="p-1.5 text-gray-400 hover:text-sky-500 transition-colors" title="Edit"><Edit size={16} /></button>
+                                                    <button onClick={() => handleDelete(item)} className="p-1.5 text-gray-400 hover:text-red-500 transition-colors" title="Delete"><Trash2 size={16} /></button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>

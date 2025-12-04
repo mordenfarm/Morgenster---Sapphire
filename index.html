@@ -625,6 +625,24 @@
       color: black;
       font-family: 'Courier New', Courier, monospace;
     }
+
+    /* Patient Profile Details Expansion */
+    .details-content {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.4s ease-out;
+    }
+    .details-content.expanded {
+      max-height: 2000px; /* Large enough to fit content */
+      transition: max-height 0.6s ease-in;
+    }
+    
+    .details-arrow {
+      transition: transform 0.3s ease;
+    }
+    .details-arrow.expanded {
+      transform: rotate(180deg);
+    }
   </style>
   <link rel="stylesheet" href="/index.css">
 </head>

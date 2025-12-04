@@ -1,15 +1,17 @@
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../../services/firebase';
 import { Patient } from '../../types';
 import { useNotification } from '../../context/NotificationContext';
 import LoadingSpinner from '../../components/utils/LoadingSpinner';
 import Modal from '../../components/utils/Modal';
-import { CheckCircle, XCircle, DollarSign, CreditCard, Receipt, Bed } from 'lucide-react';
+import { CheckCircle, XCircle, DollarSign, CreditCard, Receipt, Bed, AlertTriangle, History, Search } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import firebase from 'firebase/compat/app';
 
 const DischargeApproval: React.FC = () => {
     const [patients, setPatients] = useState<Patient[]>([]);
+    const [historyPatients, setHistoryPatients] = useState<Patient[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
     const [modalAction, setModalAction] = useState<'approve' | 'reject' | null>(null);
@@ -18,7 +20,6 @@ const DischargeApproval: React.FC = () => {
     const { userProfile } = useAuth();
 
     const fetchPendingDischarges = async () => {
-        setLoading(true);
         try {
             const snapshot = await db.collection('patients')
                 .where('status', '==', 'PendingDischarge')
@@ -27,14 +28,41 @@ const DischargeApproval: React.FC = () => {
             setPatients(patientList);
         } catch (error) {
             console.error("Error fetching patients for discharge:", error);
-            addNotification('Failed to fetch patient list.', 'error');
-        } finally {
-            setLoading(false);
+            addNotification('Failed to fetch pending list.', 'error');
         }
     };
 
+    const fetchDischargeHistory = async () => {
+        try {
+            // Fetching last 50 discharged patients. 
+            const snapshot = await db.collection('patients')
+                .where('status', '==', 'Discharged')
+                .limit(50)
+                .get();
+            
+            let list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient & { lastDischargeDate?: any }));
+            
+            // Client-side sort by discharge date (or registration date if discharge date missing)
+            list.sort((a, b) => {
+                const dateA = a.lastDischargeDate?.toDate ? a.lastDischargeDate.toDate().getTime() : (new Date(a.registrationDate).getTime());
+                const dateB = b.lastDischargeDate?.toDate ? b.lastDischargeDate.toDate().getTime() : (new Date(b.registrationDate).getTime());
+                return dateB - dateA;
+            });
+
+            setHistoryPatients(list);
+        } catch (error) {
+            console.error("Error fetching history:", error);
+        }
+    };
+
+    const loadAllData = async () => {
+        setLoading(true);
+        await Promise.all([fetchPendingDischarges(), fetchDischargeHistory()]);
+        setLoading(false);
+    };
+
     useEffect(() => {
-        fetchPendingDischarges();
+        loadAllData();
     }, []);
 
     const openModal = (patient: Patient, action: 'approve' | 'reject') => {
@@ -67,9 +95,13 @@ const DischargeApproval: React.FC = () => {
             };
 
             if (modalAction === 'approve') {
+                // Clear ward info
                 updateData.currentWardId = firebase.firestore.FieldValue.delete();
                 updateData.currentWardName = firebase.firestore.FieldValue.delete();
                 updateData.currentBedNumber = firebase.firestore.FieldValue.delete();
+                
+                // Add explicit discharge timestamp for history sorting
+                updateData.lastDischargeDate = firebase.firestore.FieldValue.serverTimestamp();
 
                 // Find the latest admission record and update it with discharge info
                 const admissionHistoryRef = patientRef.collection('admissionHistory');
@@ -105,8 +137,12 @@ const DischargeApproval: React.FC = () => {
             batch.update(patientRef, updateData);
             await batch.commit();
 
-            addNotification(`Patient status updated to ${newStatus}.`, 'success');
-            fetchPendingDischarges(); // Refresh the list
+            const actionText = modalAction === 'approve' && selectedPatient.financials.balance > 0 
+                ? 'Discharged on Credit' 
+                : newStatus;
+
+            addNotification(`Patient status updated: ${actionText}.`, 'success');
+            loadAllData(); // Refresh both lists
             closeModal();
         } catch (error) {
             console.error(`Error updating patient status:`, error);
@@ -116,15 +152,32 @@ const DischargeApproval: React.FC = () => {
 
     if (loading) return <LoadingSpinner />;
 
+    // Helper for Zimbabwe Date
+    const toZimbabweDate = (dateVal: any) => {
+        if (!dateVal) return 'Unknown';
+        const date = dateVal.toDate ? dateVal.toDate() : new Date(dateVal);
+        return date.toLocaleDateString('en-GB', { 
+            timeZone: 'Africa/Harare', 
+            year: 'numeric', 
+            month: '2-digit', 
+            day: '2-digit' 
+        });
+    };
+
     return (
-        <div>
-            <h1 className="text-3xl font-bold text-white mb-6">Discharge Approval</h1>
+        <div className="space-y-8">
+            <div>
+                <h1 className="text-3xl font-bold text-white mb-2">Discharge Approval</h1>
+                <p className="text-gray-400">Review pending discharge requests and authorize release.</p>
+            </div>
+
+            {/* Pending Approvals Grid */}
             {patients.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {patients.map(p => {
                         const hasBalance = p.financials.balance > 0;
                         return (
-                            <div key={p.id} className="bg-[#161B22] border border-gray-700 rounded-xl p-6 shadow-md flex flex-col justify-between h-full hover:border-sky-500/50 transition-colors">
+                            <div key={p.id} className={`bg-[#161B22] border rounded-xl p-6 shadow-md flex flex-col justify-between h-full transition-all ${hasBalance ? 'border-orange-900/50 hover:border-orange-500/50' : 'border-gray-700 hover:border-sky-500/50'}`}>
                                 <div>
                                     <div className="flex justify-between items-start mb-4">
                                         <div>
@@ -138,6 +191,12 @@ const DischargeApproval: React.FC = () => {
                                         <h2 className={`text-2xl font-extrabold ${hasBalance ? 'text-red-400' : 'text-green-400'}`}>
                                             ${p.financials.balance.toFixed(2)}
                                         </h2>
+                                        {hasBalance && (
+                                            <div className="flex items-center gap-1.5 mt-2 text-orange-400 text-xs font-medium">
+                                                <AlertTriangle size={12} />
+                                                <span>Requires Credit Approval</span>
+                                            </div>
+                                        )}
                                     </div>
                                     
                                     <div className="space-y-3 mb-6 text-sm text-gray-300">
@@ -152,7 +211,7 @@ const DischargeApproval: React.FC = () => {
                                         {p.currentWardName && (
                                             <div className="flex items-center justify-between pt-1">
                                                 <div className="flex items-center gap-2 text-gray-400"><Bed size={16} /> Location</div>
-                                                <span className="font-medium text-sky-400">{p.currentWardName} <span className="text-gray-500 mx-1">•</span> Bed {p.currentBedNumber}</span>
+                                                <span className="font-medium text-sky-400">{p.currentWardName}</span>
                                             </div>
                                         )}
                                     </div>
@@ -161,21 +220,20 @@ const DischargeApproval: React.FC = () => {
                                 <div className="grid grid-cols-2 gap-3 mt-auto">
                                     <button 
                                         onClick={() => openModal(p, 'reject')}
-                                        className="flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-red-600/90 hover:bg-red-600 rounded-lg transition-colors shadow-sm"
+                                        className="flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-red-600/10 hover:bg-red-600/20 border border-red-600/50 text-red-400 rounded-lg transition-colors"
                                     >
                                         <XCircle size={18} /> Reject
                                     </button>
                                     <button
-                                        onClick={() => !hasBalance && openModal(p, 'approve')}
-                                        disabled={hasBalance}
+                                        onClick={() => openModal(p, 'approve')}
                                         className={`flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white rounded-lg transition-colors shadow-sm ${
                                             hasBalance 
-                                            ? 'bg-gray-700 text-gray-400 cursor-not-allowed' 
+                                            ? 'bg-orange-600 hover:bg-orange-700' 
                                             : 'bg-green-600 hover:bg-green-500'
                                         }`}
-                                        title={hasBalance ? "Cannot approve with an outstanding balance" : "Approve discharge"}
                                     >
-                                        <CheckCircle size={18} /> Approve
+                                        {hasBalance ? <AlertTriangle size={18} /> : <CheckCircle size={18} />}
+                                        {hasBalance ? 'Approve (Credit)' : 'Approve'}
                                     </button>
                                 </div>
                             </div>
@@ -184,14 +242,99 @@ const DischargeApproval: React.FC = () => {
                 </div>
             ) : (
                 <div className="text-center p-12 bg-[#161B22] border border-gray-700 rounded-lg">
+                    <CheckCircle className="mx-auto h-12 w-12 text-gray-600 mb-4" />
                     <p className="text-gray-400 text-lg">No patients are currently pending discharge approval.</p>
                 </div>
             )}
+
+            {/* Discharge History Table */}
+            <div className="mt-12">
+                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                    <History size={24} className="text-sky-400" />
+                    Discharge History
+                </h2>
+                <div className="bg-[#161B22] border border-gray-700 rounded-xl overflow-hidden shadow-sm">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-xs text-gray-400 uppercase bg-gray-800/50 border-b border-gray-700">
+                                <tr>
+                                    <th className="px-6 py-4 font-medium">Patient Name</th>
+                                    <th className="px-6 py-4 font-medium">ID / Passport</th>
+                                    <th className="px-6 py-4 font-medium">Date Admitted</th>
+                                    <th className="px-6 py-4 font-medium">Date Discharged</th>
+                                    <th className="px-6 py-4 font-medium text-right">Total Bill</th>
+                                    <th className="px-6 py-4 font-medium text-center">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {historyPatients.length > 0 ? (
+                                    historyPatients.map((p) => {
+                                        const isCredit = p.financials.balance > 0;
+                                        const admittedDate = toZimbabweDate(p.registrationDate);
+                                        const dischargedDate = toZimbabweDate((p as any).lastDischargeDate);
+
+                                        return (
+                                            <tr key={p.id} className="hover:bg-gray-800/30 transition-colors">
+                                                <td className="px-6 py-4 font-medium text-white">
+                                                    {p.name} {p.surname}
+                                                    <div className="text-xs text-gray-500 font-mono mt-0.5">{p.hospitalNumber}</div>
+                                                </td>
+                                                <td className="px-6 py-4 text-gray-300">
+                                                    {p.nationalId || p.passportNumber || <span className="text-gray-600 italic">N/A</span>}
+                                                </td>
+                                                <td className="px-6 py-4 text-gray-400">
+                                                    {admittedDate}
+                                                </td>
+                                                <td className="px-6 py-4 text-gray-400">
+                                                    {dischargedDate}
+                                                </td>
+                                                <td className="px-6 py-4 text-right font-medium text-gray-200">
+                                                    ${p.financials.totalBill.toFixed(2)}
+                                                </td>
+                                                <td className="px-6 py-4 text-center">
+                                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${
+                                                        isCredit 
+                                                        ? 'bg-red-900/20 text-red-400 border-red-800' 
+                                                        : 'bg-green-900/20 text-green-400 border-green-800'
+                                                    }`}>
+                                                        {isCredit ? 'Discharged with Credit' : 'Fully Paid'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
+                                ) : (
+                                    <tr>
+                                        <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                                            No discharge history found.
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             {selectedPatient && (
                 <Modal isOpen={!!modalAction} onClose={closeModal} title={`Confirm ${modalAction === 'approve' ? 'Approval' : 'Rejection'}`}>
-                    <p className="text-gray-400">
+                    <p className="text-gray-300 mb-4">
                         Are you sure you want to {modalAction} the discharge for <span className="font-bold text-white">{selectedPatient.name} {selectedPatient.surname}</span>?
                     </p>
+                    
+                    {modalAction === 'approve' && selectedPatient.financials.balance > 0 && (
+                        <div className="mb-4 p-4 bg-orange-900/20 border border-orange-700/50 rounded-lg flex gap-3">
+                            <AlertTriangle className="text-orange-500 flex-shrink-0" size={24} />
+                            <div>
+                                <h4 className="text-orange-400 font-bold text-sm uppercase mb-1">Pending Balance Warning</h4>
+                                <p className="text-sm text-gray-300">
+                                    This patient has an outstanding balance of <span className="font-bold text-white">${selectedPatient.financials.balance.toFixed(2)}</span>. 
+                                    Approving this will discharge them on <strong>Credit</strong>.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
                      {modalAction === 'reject' && (
                         <div className="mt-4">
                             <label htmlFor="rejectionReason" className="block text-sm font-medium text-gray-300">Reason for Rejection (Required)</label>
@@ -207,8 +350,8 @@ const DischargeApproval: React.FC = () => {
                     )}
                     <div className="mt-6 flex justify-end space-x-4">
                         <button onClick={closeModal} className="px-4 py-2 text-sm font-medium text-gray-300 bg-gray-700 rounded-md hover:bg-gray-600">Cancel</button>
-                        <button onClick={handleConfirm} className={`px-4 py-2 text-sm font-medium text-white rounded-md ${modalAction === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}>
-                            Confirm {modalAction === 'approve' ? 'Approval' : 'Rejection'}
+                        <button onClick={handleConfirm} className={`px-4 py-2 text-sm font-medium text-white rounded-md ${modalAction === 'approve' ? (selectedPatient.financials.balance > 0 ? 'bg-orange-600 hover:bg-orange-700' : 'bg-green-600 hover:bg-green-700') : 'bg-red-600 hover:bg-red-700'}`}>
+                            Confirm {modalAction === 'approve' ? (selectedPatient.financials.balance > 0 ? 'Credit Discharge' : 'Approval') : 'Rejection'}
                         </button>
                     </div>
                 </Modal>

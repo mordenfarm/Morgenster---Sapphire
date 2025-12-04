@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import Modal from '../../components/utils/Modal';
 import { useNotification } from '../../context/NotificationContext';
@@ -5,7 +6,7 @@ import { db } from '../../services/firebase';
 import { InventoryItem, Role, PriceListItem, InventoryLog } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import firebase from 'firebase/compat/app';
-import { Pill, AlertTriangle, Calculator, ArrowRight } from 'lucide-react';
+import { Pill, AlertTriangle, Calculator, ArrowRight, Package } from 'lucide-react';
 
 interface AddEditInventoryItemModalProps {
   isOpen: boolean;
@@ -18,11 +19,13 @@ const AddEditInventoryItemModal: React.FC<AddEditInventoryItemModalProps> = ({ i
   const [formData, setFormData] = useState({
     name: '',
     category: '',
-    quantity: '',
     unitPrice: '',
     lowStockThreshold: '',
     supplier: '',
   });
+  
+  // Stock Logic State
+  const [stockToAdd, setStockToAdd] = useState(''); // Input for Quantity to Add
   
   // Pills Logic State
   const [isPill, setIsPill] = useState(false);
@@ -58,13 +61,13 @@ const AddEditInventoryItemModal: React.FC<AddEditInventoryItemModalProps> = ({ i
       return () => clearTimeout(timer);
   }, [formData.name, item]);
 
-  // Automatically calculate total quantity when box inputs change
+  // Automatically calculate stockToAdd when box inputs change (Pills logic)
   useEffect(() => {
       if (isPill) {
           const big = parseInt(bigBoxes) || 0;
           const small = parseInt(smallBoxesPerBigBox) || 0;
           const total = big * small * PILLS_PER_SMALL_BOX;
-          setFormData(prev => ({ ...prev, quantity: total > 0 ? total.toString() : prev.quantity }));
+          setStockToAdd(total > 0 ? total.toString() : '');
       }
   }, [isPill, bigBoxes, smallBoxesPerBigBox]);
 
@@ -73,11 +76,11 @@ const AddEditInventoryItemModal: React.FC<AddEditInventoryItemModalProps> = ({ i
       setFormData({
         name: item.name,
         category: item.category,
-        quantity: item.quantity.toString(),
         unitPrice: item.unitPrice.toString(),
         lowStockThreshold: item.lowStockThreshold.toString(),
         supplier: item.supplier || '',
       });
+      setStockToAdd(''); // Reset added stock when opening edit
       setIsPill(false); 
       setBigBoxes('');
       setSmallBoxesPerBigBox('');
@@ -85,11 +88,11 @@ const AddEditInventoryItemModal: React.FC<AddEditInventoryItemModalProps> = ({ i
       setFormData({
         name: '',
         category: '',
-        quantity: '',
         unitPrice: '',
         lowStockThreshold: '10',
         supplier: '',
       });
+      setStockToAdd(''); // Reset added stock for new item
       setIsPill(false);
       setBigBoxes('');
       setSmallBoxesPerBigBox('');
@@ -101,25 +104,20 @@ const AddEditInventoryItemModal: React.FC<AddEditInventoryItemModalProps> = ({ i
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
   };
   
+  // Calculation Logic
   const currentQty = item ? item.quantity : 0;
-  const enteredQty = parseInt(formData.quantity) || 0;
-  // If editing, the input field usually shows the *new* total. 
-  // However, for better UX in "Restocking", users often want to input what they are *adding*.
-  // But standard crud edits usually show the current value. 
-  // Let's assume the user edits the TOTAL field directly or uses the pill calculator to set the new total.
-  // Sidebar helps visualize the delta if we treat input as new total.
-  const diff = enteredQty - currentQty;
+  const addedQty = parseInt(stockToAdd) || 0;
+  const newTotalQty = currentQty + addedQty;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userProfile) return;
 
-    const quantity = parseInt(formData.quantity);
     const unitPrice = parseFloat(formData.unitPrice);
     const lowStockThreshold = parseInt(formData.lowStockThreshold);
 
-    if (isNaN(quantity) || quantity < 0) {
-      addNotification('Please enter a valid quantity.', 'warning');
+    if (newTotalQty < 0) {
+      addNotification('Total quantity cannot be negative.', 'warning');
       return;
     }
     if (isNaN(unitPrice) || unitPrice < 0) {
@@ -135,7 +133,7 @@ const AddEditInventoryItemModal: React.FC<AddEditInventoryItemModalProps> = ({ i
       const inventoryData: any = {
         name: formData.name,
         category: formData.category,
-        quantity,
+        quantity: newTotalQty, // Save the calculated new total
         unitPrice,
         lowStockThreshold,
         supplier: formData.supplier,
@@ -145,32 +143,33 @@ const AddEditInventoryItemModal: React.FC<AddEditInventoryItemModalProps> = ({ i
       let inventoryRef;
       if (item) {
         inventoryRef = db.collection('inventory').doc(item.id!);
-        // If adding more stock, add to totalStockReceived
-        if (diff > 0) {
-             inventoryData.totalStockReceived = firebase.firestore.FieldValue.increment(diff);
+        // If adding more stock, add to totalStockReceived history
+        if (addedQty > 0) {
+             inventoryData.totalStockReceived = firebase.firestore.FieldValue.increment(addedQty);
         }
         batch.update(inventoryRef, inventoryData);
       } else {
         inventoryRef = db.collection('inventory').doc();
         inventoryData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-        inventoryData.totalStockReceived = quantity;
+        inventoryData.totalStockReceived = newTotalQty; // Initial stock is total received
         batch.set(inventoryRef, inventoryData);
       }
 
       // 2. Log to Inventory Logs
-      if (diff !== 0 || !item) {
+      // Log only if there is a change, or if it's a new item creation
+      if (addedQty !== 0 || !item) {
           const logRef = db.collection('inventoryLogs').doc();
           const logData: Omit<InventoryLog, 'id'> = {
               itemId: inventoryRef.id,
               itemName: formData.name,
-              type: !item ? 'Restock' : (diff > 0 ? 'Restock' : 'Correction'),
-              changeAmount: !item ? quantity : diff,
+              type: !item ? 'Restock' : (addedQty > 0 ? 'Restock' : 'Correction'),
+              changeAmount: addedQty, // Log the amount added/removed
               previousQuantity: currentQty,
-              newQuantity: quantity,
+              newQuantity: newTotalQty,
               userId: userProfile.id,
               userName: `${userProfile.name} ${userProfile.surname}`,
               timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-              notes: item ? 'Manual Edit' : 'New Item Added'
+              notes: item ? (addedQty > 0 ? 'Stock Added' : 'Stock Adjustment') : 'New Item Added'
           };
           batch.set(logRef, logData);
       }
@@ -211,7 +210,7 @@ const AddEditInventoryItemModal: React.FC<AddEditInventoryItemModalProps> = ({ i
   const inputClass = "w-full px-3 py-2 border border-gray-600 rounded-md bg-gray-800 text-white modern-input disabled:opacity-50 disabled:cursor-not-allowed";
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={item ? 'Edit Stock' : 'Add New Item'} size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={item ? 'Edit Stock & Restock' : 'Add New Inventory Item'} size="lg">
       <div className="flex flex-col md:flex-row gap-6">
           <div className="flex-1">
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -236,30 +235,50 @@ const AddEditInventoryItemModal: React.FC<AddEditInventoryItemModalProps> = ({ i
                             className="mr-2 h-4 w-4 text-sky-600 rounded"
                         />
                         <label htmlFor="isPill" className="text-sm text-gray-300 flex items-center gap-1 cursor-pointer select-none">
-                            <Pill size={14}/> Is this Pills/Tablets? (Auto-calculate quantity)
+                            <Pill size={14}/> Is this Pills/Tablets? (Auto-calculate added qty)
                         </label>
                     </div>
                     
                     {isPill && (
                         <div className="grid grid-cols-2 gap-3 mb-2 animate-slide-in-top">
                             <div>
-                                <label className="block text-xs text-gray-400 mb-1">Big Boxes</label>
-                                <input type="number" value={bigBoxes} onChange={(e) => setBigBoxes(e.target.value)} min="0" className={inputClass} />
+                                <label className="block text-xs text-gray-400 mb-1">Big Boxes Added</label>
+                                <input type="number" value={bigBoxes} onChange={(e) => setBigBoxes(e.target.value)} min="0" className={inputClass} placeholder="0" />
                             </div>
                             <div>
                                 <label className="block text-xs text-gray-400 mb-1">Small Boxes / Big Box</label>
-                                <input type="number" value={smallBoxesPerBigBox} onChange={(e) => setSmallBoxesPerBigBox(e.target.value)} min="0" className={inputClass} />
+                                <input type="number" value={smallBoxesPerBigBox} onChange={(e) => setSmallBoxesPerBigBox(e.target.value)} min="0" className={inputClass} placeholder="0" />
                                 <p className="text-[10px] text-gray-500 mt-1">* 1000 pills/small box</p>
                             </div>
                         </div>
                     )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-900/50 p-3 rounded-lg border border-gray-700">
                     <div>
-                        <label className="block text-sm text-gray-400 mb-1">Total Quantity (Units)</label>
-                        <input type="number" name="quantity" placeholder="Total Quantity" value={formData.quantity} onChange={handleChange} required min="0" className={inputClass} readOnly={isPill} />
+                        <label className="block text-sm font-semibold text-gray-400 mb-1 flex items-center gap-1">
+                            <Package size={14} /> Current Stock
+                        </label>
+                        <div className="px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-gray-400 font-mono">
+                            {currentQty.toLocaleString()}
+                        </div>
                     </div>
+                    <div>
+                        <label className="block text-sm font-bold text-sky-400 mb-1 flex items-center gap-1">
+                            <ArrowRight size={14} /> {item ? 'Quantity Adding' : 'Initial Quantity'}
+                        </label>
+                        <input 
+                            type="number" 
+                            placeholder="0" 
+                            value={stockToAdd} 
+                            onChange={(e) => setStockToAdd(e.target.value)} 
+                            className={`${inputClass} border-sky-500/50 focus:border-sky-500 bg-sky-900/10 text-white font-bold`} 
+                            readOnly={isPill}
+                        />
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label className="block text-sm text-gray-400 mb-1">Unit Price ($)</label>
                         <input 
@@ -274,45 +293,47 @@ const AddEditInventoryItemModal: React.FC<AddEditInventoryItemModalProps> = ({ i
                             disabled={!canEditPrice}
                         />
                     </div>
+                    <div>
+                        <label className="block text-sm text-gray-400 mb-1">Low Stock Threshold</label>
+                        <input type="number" name="lowStockThreshold" placeholder="Alert At" value={formData.lowStockThreshold} onChange={handleChange} required min="0" className={inputClass} />
+                    </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input type="number" name="lowStockThreshold" placeholder="Low Stock Alert At" value={formData.lowStockThreshold} onChange={handleChange} required min="0" className={inputClass} />
-                    <input type="text" name="supplier" placeholder="Supplier (Optional)" value={formData.supplier} onChange={handleChange} className={inputClass} />
-                </div>
+                <input type="text" name="supplier" placeholder="Supplier (Optional)" value={formData.supplier} onChange={handleChange} className={inputClass} />
+
                 <div className="flex justify-end space-x-4 pt-2">
                     <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-300 bg-gray-700 rounded-md hover:bg-gray-600">Cancel</button>
                     <button type="submit" disabled={loading} className="px-4 py-2 text-sm font-medium text-white bg-sky-600 rounded-md hover:bg-sky-700 disabled:bg-sky-800">
-                        {loading ? 'Saving...' : 'Save Item'}
+                        {loading ? 'Saving...' : 'Save Inventory'}
                     </button>
                 </div>
             </form>
           </div>
 
           {/* Sidebar Calculator */}
-          <div className="w-full md:w-1/3 bg-gray-800 p-4 rounded-lg border border-gray-700">
-              <h4 className="text-sky-400 font-semibold mb-4 flex items-center gap-2"><Calculator size={16}/> Stock Calculator</h4>
+          <div className="w-full md:w-1/3 bg-gray-800 p-4 rounded-lg border border-gray-700 h-fit">
+              <h4 className="text-sky-400 font-semibold mb-4 flex items-center gap-2"><Calculator size={16}/> Stock Projection</h4>
               <div className="space-y-4 text-sm">
                   <div className="flex justify-between text-gray-400">
-                      <span>Current Stock:</span>
-                      <span className="text-white font-mono">{currentQty}</span>
+                      <span>Current:</span>
+                      <span className="text-white font-mono">{currentQty.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between text-gray-400">
-                      <span>Change:</span>
-                      <span className={`font-mono ${diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>{diff > 0 ? '+' : ''}{diff}</span>
+                      <span>Adding:</span>
+                      <span className={`font-mono ${addedQty >= 0 ? 'text-green-400' : 'text-red-400'}`}>{addedQty > 0 ? '+' : ''}{addedQty.toLocaleString()}</span>
                   </div>
                   <div className="h-px bg-gray-600 my-2"></div>
                   <div className="flex justify-between font-bold text-white text-lg">
                       <span>New Total:</span>
-                      <span>{enteredQty}</span>
+                      <span>{newTotalQty.toLocaleString()}</span>
                   </div>
-                  {diff > 0 && (
+                  {addedQty > 0 && (
                       <div className="mt-4 p-3 bg-green-900/20 border border-green-800 rounded text-xs text-green-300">
-                          Adding {diff} units to inventory.
+                          Adding {addedQty.toLocaleString()} units to inventory.
                       </div>
                   )}
-                  {diff < 0 && (
+                  {addedQty < 0 && (
                       <div className="mt-4 p-3 bg-red-900/20 border border-red-800 rounded text-xs text-red-300">
-                          Removing {Math.abs(diff)} units from inventory.
+                          Removing {Math.abs(addedQty).toLocaleString()} units from inventory.
                       </div>
                   )}
               </div>

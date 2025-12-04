@@ -1,9 +1,10 @@
+
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { db } from '../../services/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { useNotification } from '../../context/NotificationContext';
 import { Patient, PriceListItem, BillItem, Bill } from '../../types';
-import { Search, X, PlusCircle, DollarSign, FileText, User, CreditCard } from 'lucide-react';
+import { Search, X, PlusCircle, DollarSign, FileText, User, CreditCard, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import firebase from 'firebase/compat/app';
 import Modal from '../../components/utils/Modal';
@@ -15,6 +16,11 @@ interface PaymentModalProps {
     billItems: BillItem[];
     patient: Patient;
     onSuccess: () => void;
+}
+
+// Extended interface to handle local stock validation
+interface ExtendedBillItem extends BillItem {
+    availableStock?: number;
 }
 
 const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, totalBill, billItems, patient, onSuccess }) => {
@@ -49,11 +55,21 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, totalBill,
             status = 'Paid';
         }
 
+        // Clean items before saving to remove availableStock if strictly adhering to BillItem type, 
+        // though keeping it usually doesn't hurt. We'll map to base BillItem to be safe.
+        const cleanItems: BillItem[] = billItems.map(item => ({
+            id: item.id,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            totalPrice: item.totalPrice
+        }));
+
         const billData = {
             patientId: patient.id!,
             patientName: `${patient.name} ${patient.surname}`,
             patientHospitalNumber: patient.hospitalNumber,
-            items: billItems,
+            items: cleanItems,
             totalBill,
             amountPaidAtTimeOfBill: amountPaid,
             balance,
@@ -77,7 +93,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, totalBill,
             });
 
             // Update Inventory Stock if items match
-            for (const item of billItems) {
+            for (const item of cleanItems) {
                 const inventoryQuery = await db.collection('inventory').where('name', '==', item.description).limit(1).get();
                 if (!inventoryQuery.empty) {
                     const inventoryDoc = inventoryQuery.docs[0];
@@ -159,7 +175,7 @@ const Billing: React.FC = () => {
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
 
     // Billing State
-    const [billItems, setBillItems] = useState<BillItem[]>([]);
+    const [billItems, setBillItems] = useState<ExtendedBillItem[]>([]);
     const [itemSearch, setItemSearch] = useState('');
     const [itemResults, setItemResults] = useState<PriceListItem[]>([]);
     
@@ -223,13 +239,25 @@ const Billing: React.FC = () => {
         setPatientResults([]);
     };
 
-    const addItem = (item: PriceListItem) => {
-        const newItem: BillItem = {
+    const addItem = async (item: PriceListItem) => {
+        let availableStock: number | undefined = undefined;
+        try {
+            // Check inventory for stock level
+            const inventorySnapshot = await db.collection('inventory').where('name', '==', item.name).limit(1).get();
+            if (!inventorySnapshot.empty) {
+                availableStock = inventorySnapshot.docs[0].data().quantity;
+            }
+        } catch (e) {
+            console.error("Error fetching stock:", e);
+        }
+
+        const newItem: ExtendedBillItem = {
             id: item.id!,
             description: item.name,
             quantity: 1,
             unitPrice: item.unitPrice,
             totalPrice: item.unitPrice,
+            availableStock: availableStock
         };
         setBillItems([...billItems, newItem]);
         setItemSearch('');
@@ -250,6 +278,11 @@ const Billing: React.FC = () => {
     };
 
     const totalBill = useMemo(() => billItems.reduce((sum, item) => sum + item.totalPrice, 0), [billItems]);
+    
+    // Validation Check
+    const hasInvalidQuantities = useMemo(() => {
+        return billItems.some(item => item.availableStock !== undefined && item.quantity > item.availableStock);
+    }, [billItems]);
 
     const resetBilling = () => {
         setSelectedPatient(null);
@@ -271,11 +304,19 @@ const Billing: React.FC = () => {
         }
         setCreditLoading(true);
 
+        const cleanItems: BillItem[] = billItems.map(item => ({
+            id: item.id,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            totalPrice: item.totalPrice
+        }));
+
         const billData = {
             patientId: selectedPatient.id!,
             patientName: `${selectedPatient.name} ${selectedPatient.surname}`,
             patientHospitalNumber: selectedPatient.hospitalNumber,
-            items: billItems,
+            items: cleanItems,
             totalBill,
             amountPaidAtTimeOfBill: 0,
             balance: totalBill,
@@ -298,7 +339,7 @@ const Billing: React.FC = () => {
             });
 
             // Update Inventory Stock if items match
-            for (const item of billItems) {
+            for (const item of cleanItems) {
                 const inventoryQuery = await db.collection('inventory').where('name', '==', item.description).limit(1).get();
                 if (!inventoryQuery.empty) {
                     const inventoryDoc = inventoryQuery.docs[0];
@@ -373,20 +414,35 @@ const Billing: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-700">
-                                {billItems.map((item, index) => (
-                                    <tr key={index} className="hover:bg-gray-800/50">
-                                        <td className="px-4 py-3 font-medium text-white">{item.description}</td>
-                                        <td className="px-4 py-3">
-                                            <input type="number" value={item.quantity} min="1" onChange={e => updateItemQuantity(index, parseInt(e.target.value) || 1)}
-                                                   className="w-20 text-center rounded-md border-gray-600 bg-gray-800 text-white shadow-sm focus:border-sky-500 focus:ring-sky-500 sm:text-sm mx-auto block" />
-                                        </td>
-                                        <td className="px-4 py-3 text-right">${item.unitPrice.toFixed(2)}</td>
-                                        <td className="px-4 py-3 text-right font-semibold text-white">${item.totalPrice.toFixed(2)}</td>
-                                        <td className="px-4 py-3 text-center">
-                                            <button onClick={() => removeItem(index)} className="text-red-500 hover:text-red-400 p-1 rounded hover:bg-red-900/20"><X size={18} /></button>
-                                        </td>
-                                    </tr>
-                                ))}
+                                {billItems.map((item, index) => {
+                                    const isOverStock = item.availableStock !== undefined && item.quantity > item.availableStock;
+                                    return (
+                                        <tr key={index} className="hover:bg-gray-800/50">
+                                            <td className="px-4 py-3 font-medium text-white">{item.description}</td>
+                                            <td className="px-4 py-3 relative">
+                                                <div className="flex flex-col items-center">
+                                                    {isOverStock && (
+                                                        <span className="text-[10px] font-bold text-red-400 mb-1 animate-pulse">
+                                                            Max: {item.availableStock}
+                                                        </span>
+                                                    )}
+                                                    <input 
+                                                        type="number" 
+                                                        value={item.quantity} 
+                                                        min="1" 
+                                                        onChange={e => updateItemQuantity(index, parseInt(e.target.value) || 1)}
+                                                        className={`w-20 text-center rounded-md border text-white shadow-sm focus:ring-opacity-50 sm:text-sm mx-auto block transition-colors ${isOverStock ? 'border-red-500 bg-red-900/20 focus:border-red-500 focus:ring-red-500' : 'border-gray-600 bg-gray-800 focus:border-sky-500 focus:ring-sky-500'}`}
+                                                    />
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3 text-right">${item.unitPrice.toFixed(2)}</td>
+                                            <td className="px-4 py-3 text-right font-semibold text-white">${item.totalPrice.toFixed(2)}</td>
+                                            <td className="px-4 py-3 text-center">
+                                                <button onClick={() => removeItem(index)} className="text-red-500 hover:text-red-400 p-1 rounded hover:bg-red-900/20"><X size={18} /></button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                                 {billItems.length === 0 && (
                                     <tr>
                                         <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
@@ -428,17 +484,25 @@ const Billing: React.FC = () => {
                         </div>
                     </div>
 
+                    {/* Error Message if Stock Invalid */}
+                    {hasInvalidQuantities && (
+                        <div className="mt-4 p-3 bg-red-900/20 border border-red-800 rounded flex items-center justify-end text-red-300 text-sm">
+                            <AlertCircle size={16} className="mr-2" />
+                            <span>Cannot proceed. Quantity exceeds available stock for one or more items.</span>
+                        </div>
+                    )}
+
                     {/* Action Buttons */}
                     <div className="mt-8 flex justify-end space-x-4">
                         <button 
                             onClick={handleBillOnCredit} 
-                            disabled={billItems.length === 0}
+                            disabled={billItems.length === 0 || hasInvalidQuantities}
                             className="inline-flex items-center justify-center py-2 px-6 border border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                             <CreditCard className="mr-2" size={20} />
                             Bill on Credit
                         </button>
-                        <button onClick={() => setPaymentModalOpen(true)} disabled={billItems.length === 0}
+                        <button onClick={() => setPaymentModalOpen(true)} disabled={billItems.length === 0 || hasInvalidQuantities}
                             className="inline-flex items-center justify-center py-2 px-6 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                             <DollarSign className="mr-2" size={20} />
                             Proceed to Payment
@@ -451,7 +515,7 @@ const Billing: React.FC = () => {
                     isOpen={isPaymentModalOpen}
                     onClose={() => setPaymentModalOpen(false)}
                     totalBill={totalBill}
-                    billItems={billItems}
+                    billItems={billItems} // Will pass as ExtendedBillItem[] but PaymentModal takes BillItem[] which is compatible
                     patient={selectedPatient}
                     onSuccess={resetBilling}
                 />

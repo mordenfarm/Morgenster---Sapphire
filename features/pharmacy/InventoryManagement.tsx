@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { db } from '../../services/firebase';
 import { InventoryItem, Role, InventoryLog, BillItem, Bill } from '../../types';
@@ -226,6 +227,7 @@ const InventoryManagement: React.FC = () => {
                             <th className="px-6 py-3 text-center">Current Stock</th>
                             <th className="px-6 py-3 text-center">Unit Price</th>
                             <th className="px-6 py-3 text-center">Stock Value</th>
+                            <th className="px-6 py-3 text-center">Last Updated</th>
                             <th className="px-6 py-3 text-center">Actions</th>
                         </tr>
                     </thead>
@@ -233,9 +235,10 @@ const InventoryManagement: React.FC = () => {
                         {filteredItems.map((item) => {
                             const isLowStock = item.quantity <= item.lowStockThreshold;
                             const stockValue = item.quantity * item.unitPrice;
+                            const lastUpdated = item.updatedAt?.toDate ? item.updatedAt.toDate().toLocaleString() : 'N/A';
                             
                             return (
-                                <tr key={item.id} className="border-b border-gray-700 hover:bg-gray-800 transition-colors">
+                                <tr key={item.id} className={`border-b border-gray-700 transition-colors ${isLowStock ? 'bg-red-900/10 hover:bg-red-900/20' : 'hover:bg-gray-800'}`}>
                                     <td className="px-6 py-4 font-medium text-white">
                                         {item.name}
                                         {isLowStock && (
@@ -253,6 +256,7 @@ const InventoryManagement: React.FC = () => {
                                     </td>
                                     <td className="px-6 py-4 text-center text-gray-300">${item.unitPrice.toFixed(2)}</td>
                                     <td className="px-6 py-4 text-center font-medium text-green-400">${stockValue.toFixed(2)}</td>
+                                    <td className="px-6 py-4 text-center text-xs text-gray-400">{lastUpdated}</td>
                                     <td className="px-6 py-4 text-center">
                                         <div className="flex justify-center gap-2">
                                             {canModify && (

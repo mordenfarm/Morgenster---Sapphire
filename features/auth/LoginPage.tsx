@@ -123,7 +123,7 @@ const LoginPage: React.FC = () => {
                 <div className="text-center mb-8">
                     <img src="https://i.ibb.co/TDT9QtC9/images.png" alt="Logo" className="mx-auto h-16 w-16 rounded-lg object-cover shadow-lg" />
                     <h2 className="mt-6 text-3xl font-extrabold text-white">
-                        SAPPHIRE SURGERY
+                        SAPPHIRE CLINIC
                     </h2>
                     <p className="mt-2 text-sm text-gray-400">
                         Sign in to your account

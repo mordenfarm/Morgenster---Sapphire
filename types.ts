@@ -18,8 +18,6 @@ export interface Ward {
   name: string;
   totalBeds: number;
   pricePerDay: number;
-  gender?: 'Male' | 'Female' | 'Mixed';
-  maxAge?: number;
 }
 
 export interface UserProfile {

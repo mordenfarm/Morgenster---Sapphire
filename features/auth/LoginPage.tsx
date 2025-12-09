@@ -121,7 +121,7 @@ const LoginPage: React.FC = () => {
         <div className="min-h-screen bg-[#0D1117] flex items-center justify-center p-4">
             <div className="w-full max-w-md">
                 <div className="text-center mb-8">
-                    <img src="https://i.ibb.co/G4q0tY8X/sapphire.png" alt="Logo" className="mx-auto h-16 w-16 rounded-lg object-cover shadow-lg" />
+                    <img src="https://i.ibb.co/XkFvG8M4/sapphire-favicon.png" alt="Logo" className="mx-auto h-16 w-16 rounded-lg object-cover shadow-lg" />
                     <h2 className="mt-6 text-3xl font-extrabold text-white">
                         SAPPHIRE CLINIC
                     </h2>

@@ -54,8 +54,8 @@ const ReceiptPreviewModal: React.FC<ReceiptPreviewModalProps> = ({ isOpen, onClo
                 )}
                 <div id="receipt-preview" className="receipt-preview">
                     <header className="receipt-header">
-                        <img src="https://i.ibb.co/TDT9QtC9/images.png" alt="Logo" className="receipt-logo" />
-                        <p>RCZ MORGENSTER HOSPITAL</p>
+                        <img src="https://i.ibb.co/G4q0tY8X/sapphire.png" alt="Logo" className="receipt-logo" />
+                        <p>SAPPHIRE SURGERY</p>
                         <p>Morgenster Mission, Masvingo</p>
                         <p>Tel: +263 XX XXX XXXX</p>
                     </header>
